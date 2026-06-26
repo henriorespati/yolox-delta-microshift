@@ -261,11 +261,11 @@ async def predict_batch(files: list[UploadFile] = File(...)):
     return JSONResponse({"results": results, "count": len(results)})
 
 
-@app.post("/reload-model")
-async def reload_model():
-    """Hot-reload after delta update writes a new yolox_s.pth to the PVC."""
-    try:
-        load_model()
-        return {"status": "reloaded", "loaded_at": state["loaded_at"]}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+# @app.post("/reload-model")
+# async def reload_model():
+#     """Hot-reload after delta update writes a new yolox_s.pth to the PVC."""
+#     try:
+#         load_model()
+#         return {"status": "reloaded", "loaded_at": state["loaded_at"]}
+#     except Exception as exc:
+#         raise HTTPException(status_code=500, detail=str(exc))

@@ -1,27 +1,51 @@
-# YOLOX-S on MicroShift — Edge Inference Pipeline
+# YOLOX-S on MicroShift — Delta Model Deployment
 
-YOLOX-S object detection deployed on Red Hat MicroShift (lightweight OpenShift on a single node), with an edge delta update pipeline for continuous model improvement without distributing full model weights.
+Deploy YOLOX-S object detection on Red Hat MicroShift without rebuilding container images. Delta weights are merged with the base model on the host and made available to the inference pod via a `hostPath` volume mount at `/opt/models`. Updating the model is a matter of running `apply_delta.sh` on the host and cycling the deployment replicas.
 
 ---
 
 ## Repository layout
 
 ```
-microshift/
+yolox-delta-microshift/
 ├── Containerfile              ← Container image (ubi9/python-314-minimal + PyTorch CPU + YOLOX)
 ├── app/
 │   └── inference_server.py    ← FastAPI inference server (COCO 80 classes)
 ├── ocp/
 │   ├── namespace.yml          ← Namespace: yolox-edge
-│   ├── configmap.yml          ← Inference thresholds, model path, delta server URL
-│   ├── pvc.yml                ← PersistentVolumeClaim for model weights (lvms-operator)
-│   ├── model-init-job.yml     ← One-shot Job: downloads yolox_s.pth from Megvii release
-│   ├── deployment.yml         ← Deployment: inference pod with init container
+│   ├── deployment.yml         ← Deployment: hostPath mount from /opt/models (read-only)
 │   └── service.yml            ← NodePort service on port 30800
 └── delta/
-    ├── apply_delta.sh         ← Script: applies a delta .pth to the running pod
+    ├── apply_delta.sh         ← Script: merges delta weights with base model on the host
     └── delta_sample.pth       ← Sample delta (~3.7 MB, float16 compressed)
 ```
+
+---
+
+## How it works
+
+```
+                   MicroShift Node
+┌────────────────────────────────────────────────────────┐
+│                                                        │
+│   /opt/models/yolox_s.pth   ◄── apply_delta.sh merges │
+│          │                       delta + base model    │
+│          │ hostPath (readOnly)                         │
+│          ▼                                             │
+│   ┌──────────────────────┐                             │
+│   │  yolox-s pod         │                             │
+│   │  /models/yolox_s.pth │──► FastAPI :8000            │
+│   └──────────────────────┘       │                     │
+│                                  │ NodePort 30800      │
+└──────────────────────────────────┼─────────────────────┘
+                                   ▼
+                              Inference clients
+```
+
+1. The base model (`yolox_s.pth`) is pre-placed at `/opt/models` on the MicroShift host.
+2. The deployment mounts `/opt/models` into the pod as a read-only `hostPath` volume.
+3. When a new delta is available, `apply_delta.sh` merges it with the base model on the host, producing an updated `/opt/models/yolox_s.pth`.
+4. Scale the deployment down and back up to pick up the new model — no image rebuild required.
 
 ---
 
@@ -30,13 +54,26 @@ microshift/
 - MicroShift installed and running
 - Podman for building the container image
 - `oc` CLI configured with MicroShift kubeconfig
-- EBS volume attached and mounted (for container storage)
+- Base model (`yolox_s.pth`) present at `/opt/models/yolox_s.pth` on the MicroShift host
+- **For delta merging on the host**: Python 3, PyTorch, and [yolo-weight-delta](https://github.com/ganeshmurthy/yolo-weight-delta) installed on the MicroShift host
 
 ---
 
 ## Quick start
 
-### 1. Build and load the container image
+### 1. Prepare the host model directory
+
+Ensure the base YOLOX-S model is available on the MicroShift host:
+
+```bash
+sudo mkdir -p /opt/models
+
+# Download the base model (if not already present)
+sudo curl -L -o /opt/models/yolox_s.pth \
+  https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.pth
+```
+
+### 2. Build and load the container image
 
 ```bash
 # Build
@@ -49,20 +86,18 @@ sudo skopeo copy \
   containers-storage:localhost/yolox-s-inference:latest
 ```
 
-### 2. Deploy to MicroShift
+### 3. Deploy to MicroShift
 
 ```bash
 oc apply -f ocp/namespace.yml
-oc apply -f ocp/ -n yolox-edge
-
-# Wait for model download Job to complete
-oc wait -n yolox-edge job/yolox-model-init --for=condition=complete --timeout=120s
+oc apply -f ocp/deployment.yml
+oc apply -f ocp/service.yml
 
 # Watch the inference pod come up (~90s for PyTorch to load)
 oc get pods -n yolox-edge -w
 ```
 
-### 3. Test inference
+### 4. Test inference
 
 ```bash
 NODE_IP=$(oc get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
@@ -81,16 +116,22 @@ curl -X POST http://${NODE_IP}:30800/predict \
 
 Model updates are distributed as small delta `.pth` files (~3.7 MB) rather than full model weights (~43 MB). A delta captures only the changes to the detection head after fine-tuning.
 
+### Merge the delta and redeploy
+
 ```bash
-# Apply a delta to the running pod and hot-reload
+# 1. Merge delta weights with the base model on the host
 bash delta/apply_delta.sh delta/delta_sample.pth
+
+# 2. Scale down the deployment (stops the running pod)
+oc scale deployment/yolox-s -n yolox-edge --replicas=0
+
+# 3. Scale back up (pod starts with the updated model)
+oc scale deployment/yolox-s -n yolox-edge --replicas=1
 ```
 
-The script:
-1. Copies the delta into the pod via `oc cp` transfer
-2. Runs `apply_head_delta()` from `weight_delta.py` inside the pod
-3. Saves the updated `yolox_s.pth` back to the PVC
-4. Calls `POST /reload-model` to hot-swap weights without restarting the pod
+That's it — no image rebuild, no container registry push, no PVC provisioning.
+
+> **Note:** The `apply_delta.sh` script currently contains logic for in-pod delta application (via `oc cp` / `oc exec`). It needs to be updated to run the merge directly on the host against `/opt/models/yolox_s.pth`. The merge logic uses `apply_head_delta()` from [yolo-weight-delta](https://github.com/ganeshmurthy/yolo-weight-delta).
 
 ---
 
@@ -102,7 +143,7 @@ The script:
 | `GET` | `/status` | Stats — avg inference ms, total inference count |
 | `POST` | `/predict` | Single image inference — returns bounding boxes and class labels |
 | `POST` | `/predict/batch` | Batch inference — multiple images in one request |
-| `POST` | `/reload-model` | Hot-reload weights from disk after delta update |
+| `POST` | `/reload-model` | Hot-reload weights from disk without restarting the pod |
 
 ---
 
@@ -110,15 +151,14 @@ The script:
 
 Base image: `registry.access.redhat.com/ubi9/python-314-minimal`
 
-Key decisions:
 - **No C extension compilation** — YOLOX's `fast_cocoeval` extension requires Python dev headers not available in the minimal image. It is only used for COCO evaluation, not inference. YOLOX source is added to `PYTHONPATH` instead.
 - **Free UBI repos only** — `microdnf` is restricted to `ubi-9-baseos-rpms` and `ubi-9-appstream-rpms` to avoid 403 errors from entitled RHEL CDN repos on unregistered hosts.
 - **Non-root user 1001** — required by MicroShift's Security Context Constraints.
-- **`weight_delta.py` included** — cloned from `ganeshmurthy/yolo-weight-delta` at `/opt/weight-delta/` so delta application runs inside the same pod environment as inference.
+- **`weight_delta.py` included** — cloned from `ganeshmurthy/yolo-weight-delta` at `/opt/weight-delta/` for in-pod delta operations.
 
 ---
 
-## Fine-tuning the model (Mothership)
+## Generating deltas (Mothership)
 
 To generate a new delta from a retrained model:
 

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: yolox-model-pvc
+  namespace: yolox-edge
+  labels:
+    app.kubernetes.io/name: yolox-edge
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # MicroShift uses lvms-operator (you can see it in your running pods).
+  # StorageClass name is typically "topolvm-provisioner" on MicroShift.
+  # Leave storageClassName unset to use the cluster default, or set explicitly:
+  # storageClassName: topolvm-provisioner
+  resources:
+    requests:
+      storage: 5Gi     # yolox_s.pth is ~36 MB; 5 Gi leaves room for delta staging

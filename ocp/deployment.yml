@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yolox-s
+  namespace: yolox-edge
+  labels:
+    app.kubernetes.io/name: yolox-s
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: edge-inference-pipeline
+spec:
+  replicas: 1           # Single replica per edge device (MicroShift is single-node)
+  selector:
+    matchLabels:
+      app: yolox-s
+  template:
+    metadata:
+      labels:
+        app: yolox-s
+        app.kubernetes.io/name: yolox-s
+      annotations:
+        # Trigger rollout when ConfigMap changes:
+        checksum/config: "change-this-to-force-rollout"
+    spec:
+      # ── Init container: wait until model weights exist ──────────────────────
+      initContainers:
+      - name: wait-for-model
+        image: busybox:stable
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for model weights at /models/yolox_s.pth ..."
+          until [ -f /models/yolox_s.pth ]; do
+            echo "  Model not ready yet, sleeping 5s..."
+            sleep 5
+          done
+          echo "✅ Model found."
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+
+      containers:
+      - name: yolox-inference
+        # Replace with your actual registry/image after building:
+        image: localhost/yolox-s-inference:latest
+        imagePullPolicy: Never
+
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+
+        # Pull all inference config from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: yolox-config
+
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "3Gi"    # PyTorch CPU inference for YOLOX-S peaks ~1.5 GB
+
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+
+        # ── Probes ──────────────────────────────────────────────────────────
+        # Give 90 s for PyTorch + YOLOX to initialise before first check
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 12   # 60 + 12*10 = 180 s max startup window
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: yolox-model-pvc
+
+      # Ensure the pod is evicted last on resource pressure
+      priorityClassName: system-cluster-critical

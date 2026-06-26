@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yolox-config
+  namespace: yolox-edge
+data:
+  # Inference thresholds — mirror what weight_delta.py was trained against
+  CONF_THRESHOLD: "0.25"
+  NMS_THRESHOLD: "0.45"
+  INPUT_SIZE: "640"         # YOLOX-S native input resolution
+  NUM_CLASSES: "80"         # COCO 80 classes (update if custom-trained)
+  MODEL_PATH: "/models/yolox_s.pth"

@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: yolox-model-init
+  namespace: yolox-edge
+  labels:
+    app.kubernetes.io/name: yolox-model-init
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: model-downloader
+        image: curlimages/curl:latest
+        command:
+        - sh
+        - -c
+        - |
+          MODEL=/models/yolox_s.pth
+          URL="https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.pth"
+
+          if [ -f "$MODEL" ]; then
+            echo "   Model already exists at $MODEL, skipping download."
+            exit 0
+          fi
+
+          echo "   Downloading YOLOX-S weights from Megvii release..."
+          curl -L --retry 5 --retry-delay 5 --progress-bar \
+            -o "$MODEL" "$URL"
+
+          echo "   Download complete: $(du -sh $MODEL | cut -f1)"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: yolox-model-pvc
+  backoffLimit: 3

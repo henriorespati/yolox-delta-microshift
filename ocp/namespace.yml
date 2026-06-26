@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yolox-edge
+  labels:
+    app.kubernetes.io/name: yolox-edge
+    app.kubernetes.io/part-of: edge-inference-pipeline

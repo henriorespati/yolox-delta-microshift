@@ -28,7 +28,7 @@ yolox-delta-microshift/
                    MicroShift Node
 ┌────────────────────────────────────────────────────────┐
 │                                                        │
-│   /opt/models/yolox_s.pth   ◄── apply_delta.sh merges │
+│   /opt/models/yolox_s.pth   ◄── apply_delta.sh merges  │
 │          │                       delta + base model    │
 │          │ hostPath (readOnly)                         │
 │          ▼                                             │

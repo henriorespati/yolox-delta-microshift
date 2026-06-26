@@ -1,6 +1,6 @@
 # YOLOX-S on MicroShift — Edge Inference Pipeline
 
-YOLOX-S object detection deployed on Red Hat MicroShift (OpenShift on a single EC2 node), with a Mothership-to-Edge delta update pipeline for continuous model improvement without distributing full model weights.
+YOLOX-S object detection deployed on Red Hat MicroShift (lightweight OpenShift on a single node), with an edge delta update pipeline for continuous model improvement without distributing full model weights.
 
 ---
 
@@ -27,7 +27,7 @@ microshift/
 
 ## Prerequisites
 
-- RHEL 9 EC2 instance with MicroShift installed and running
+- MicroShift installed and running
 - Podman for building the container image
 - `oc` CLI configured with MicroShift kubeconfig
 - EBS volume attached and mounted (for container storage)
@@ -87,7 +87,7 @@ bash delta/apply_delta.sh delta/delta_sample.pth
 ```
 
 The script:
-1. Copies the delta into the pod via base64 transfer
+1. Copies the delta into the pod via `oc cp` transfer
 2. Runs `apply_head_delta()` from `weight_delta.py` inside the pod
 3. Saves the updated `yolox_s.pth` back to the PVC
 4. Calls `POST /reload-model` to hot-swap weights without restarting the pod

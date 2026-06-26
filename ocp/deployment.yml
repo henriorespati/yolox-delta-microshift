@@ -3,57 +3,47 @@ kind: Deployment
 metadata:
   name: yolox-s
   namespace: yolox-edge
-  labels:
-    app.kubernetes.io/name: yolox-s
-    app.kubernetes.io/component: inference
-    app.kubernetes.io/part-of: edge-inference-pipeline
 spec:
-  replicas: 1           # Single replica per edge device (MicroShift is single-node)
+  replicas: 1
+
   selector:
     matchLabels:
       app: yolox-s
+
   template:
     metadata:
       labels:
         app: yolox-s
-        app.kubernetes.io/name: yolox-s
-      annotations:
-        # Trigger rollout when ConfigMap changes:
-        checksum/config: "change-this-to-force-rollout"
-    spec:
-      # ── Init container: wait until model weights exist ──────────────────────
-      initContainers:
-      - name: wait-for-model
-        image: busybox:stable
-        command:
-        - sh
-        - -c
-        - |
-          echo "Waiting for model weights at /models/yolox_s.pth ..."
-          until [ -f /models/yolox_s.pth ]; do
-            echo "  Model not ready yet, sleeping 5s..."
-            sleep 5
-          done
-          echo "✅ Model found."
-        volumeMounts:
-        - name: model-storage
-          mountPath: /models
 
+    spec:
       containers:
-      - name: yolox-inference
-        # Replace with your actual registry/image after building:
+      - name: yolox-s
         image: localhost/yolox-s-inference:latest
         imagePullPolicy: Never
 
         ports:
-        - name: http
-          containerPort: 8000
-          protocol: TCP
+        - containerPort: 8000
 
-        # Pull all inference config from ConfigMap
-        envFrom:
-        - configMapRef:
-            name: yolox-config
+        env:
+        - name: MODEL_PATH
+          value: /models/yolox_s.pth
+
+        - name: CONF_THRESHOLD
+          value: "0.25"
+
+        - name: NMS_THRESHOLD
+          value: "0.45"
+
+        - name: INPUT_SIZE
+          value: "640"
+
+        - name: NUM_CLASSES
+          value: "80"
+
+        volumeMounts:
+        - name: model-volume
+          mountPath: /models
+          readOnly: true
 
         resources:
           requests:
@@ -61,42 +51,24 @@ spec:
             memory: "1Gi"
           limits:
             cpu: "2"
-            memory: "3Gi"    # PyTorch CPU inference for YOLOX-S peaks ~1.5 GB
-
-        volumeMounts:
-        - name: model-storage
-          mountPath: /models
-
-        # ── Probes ──────────────────────────────────────────────────────────
-        # Give 90 s for PyTorch + YOLOX to initialise before first check
-        startupProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 60
-          periodSeconds: 10
-          failureThreshold: 12   # 60 + 12*10 = 180 s max startup window
-
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          periodSeconds: 30
-          timeoutSeconds: 5
-          failureThreshold: 3
+            memory: "3Gi"
 
         readinessProbe:
           httpGet:
             path: /health
             port: 8000
+          initialDelaySeconds: 20
           periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 2
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
 
       volumes:
-      - name: model-storage
-        persistentVolumeClaim:
-          claimName: yolox-model-pvc
-
-      # Ensure the pod is evicted last on resource pressure
-      priorityClassName: system-cluster-critical
+      - name: model-volume
+        hostPath:
+          path: /opt/models
+          type: Directory

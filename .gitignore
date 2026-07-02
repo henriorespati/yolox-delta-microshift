@@ -3,3 +3,8 @@
 
 .vscode/
 .idea/
+
+*.bak
+
+YOLOX
+yolo-weight-delta

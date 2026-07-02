@@ -1,25 +1,26 @@
-FROM registry.access.redhat.com/ubi9/python-314-minimal
+FROM registry.access.redhat.com/ubi9/python-314-minimal AS builder
 
-# ── Notes on this base image ─────────────────────────────────────────────────
-# • Package manager : microdnf (not apt-get / dnf)
-# • Default user    : 1001 (unprivileged) — switch to root for installs
-# • Python          : 3.14 pre-installed at /opt/app-root/
-# ─────────────────────────────────────────────────────────────────────────────
+WORKDIR /build
+
+# Copy source repos
+COPY YOLOX /build/YOLOX
+COPY yolo-weight-delta /build/weight-delta
+
+# ponytail: directories stripped on host before COPY to avoid macOS extended attrs
+# ponytail: training imports removed on host via sed before COPY
+
+# ── Final stage ──────────────────────────────────────────────────────────
+FROM registry.access.redhat.com/ubi9/python-314-minimal
 
 USER root
 
 WORKDIR /app
 
 # System packages — restricted to free UBI repos only.
-# --disablerepo prevents microdnf hitting entitled RHEL CDN repos (403 on
-# unregistered hosts).
-# NOTE: gcc/make are NOT needed anymore — we skip YOLOX's C extension
-# compilation entirely (fast_cocoeval is COCO evaluation only, not inference).
 RUN microdnf install -y \
     --disablerepo='*' \
     --enablerepo='ubi-9-baseos-rpms' \
     --enablerepo='ubi-9-appstream-rpms' \
-    git \
     wget \
     tar \
     && microdnf clean all
@@ -50,25 +51,9 @@ RUN pip install --no-cache-dir \
     "python-multipart==0.0.12" \
     packaging
 
-# Clone YOLOX source — NO pip install, NO C extension compilation.
-#
-# The fast_cocoeval C extension in yolox/layers/cocoeval/ requires Python.h
-# (python3.14-devel) which is not in the UBI9 minimal image, and is only
-# used for COCO benchmark evaluation — never for inference.
-#
-# Adding /opt/YOLOX to PYTHONPATH gives full access to all inference APIs:
-#   yolox.exp.get_exp(), yolox.utils.postprocess(), ValTransform, etc.
-RUN git clone --depth=1 https://github.com/Megvii-BaseDetection/YOLOX.git /opt/YOLOX && \
-    rm -rf /opt/YOLOX/.git && \
-    # Remove training-only imports not needed for inference.
-    # mlflow_logger pulls in packaging, mlflow, and other heavy training deps.
-    # LRScheduler pulls in tensorboard. Neither is used during edge inference.
-    sed -i '/from .mlflow_logger import MlflowLogger/d' /opt/YOLOX/yolox/utils/__init__.py && \
-    sed -i '/from .logger import/d' /opt/YOLOX/yolox/utils/__init__.py
-
-# Clone weight_delta repo
-RUN git clone --depth=1 https://github.com/ganeshmurthy/yolo-weight-delta.git /opt/weight-delta && \
-    rm -rf /opt/weight-delta/.git
+# Copy pre-cloned YOLOX and weight-delta from builder stage
+COPY --from=builder /build/YOLOX /opt/YOLOX
+COPY --from=builder /build/weight-delta /opt/weight-delta
 
 ENV PYTHONPATH="/opt/YOLOX:/opt/weight-delta"
 
@@ -77,7 +62,7 @@ COPY app/ /app/
 
 # Create model directory and fix ownership for non-root user
 RUN mkdir -p /models && \
-    chown -R 1001:1001 /app /models /opt/YOLOX
+    chown -R 1001:1001 /app /models /opt/YOLOX /opt/weight-delta
 
 EXPOSE 8000
 

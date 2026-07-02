@@ -90,6 +90,10 @@ sudo skopeo copy \
 
 ```bash
 oc apply -f ocp/namespace.yml
+
+# Grant hostmount-anyuid SCC to default service account for hostPath access
+oc adm policy add-scc-to-user hostmount-anyuid -z default -n yolox-edge
+
 oc apply -f ocp/deployment.yml
 oc apply -f ocp/service.yml
 

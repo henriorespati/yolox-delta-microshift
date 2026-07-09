@@ -23,6 +23,8 @@ RUN microdnf install -y \
     --enablerepo='ubi-9-appstream-rpms' \
     wget \
     tar \
+    gstreamer1 \
+    gstreamer1-plugins-base \
     && microdnf clean all
 
 # Pin setuptools<82 before torch (torch 2.12.x requires setuptools<82)
@@ -49,7 +51,8 @@ RUN pip install --no-cache-dir \
     "fastapi==0.115.0" \
     "uvicorn[standard]==0.32.0" \
     "python-multipart==0.0.12" \
-    packaging
+    packaging \
+    pyzmq
 
 # Copy pre-cloned YOLOX and weight-delta from builder stage
 COPY --from=builder /build/YOLOX /opt/YOLOX

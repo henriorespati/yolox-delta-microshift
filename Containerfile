@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/python-314-minimal AS builder
+FROM registry.access.redhat.com/ubi9/python-314 AS builder
 
 WORKDIR /build
 
@@ -10,22 +10,19 @@ COPY yolo-weight-delta /build/weight-delta
 # ponytail: training imports removed on host via sed before COPY
 
 # ── Final stage ──────────────────────────────────────────────────────────
-FROM registry.access.redhat.com/ubi9/python-314-minimal
+FROM registry.access.redhat.com/ubi9/python-314
 
 USER root
 
 WORKDIR /app
 
 # System packages — restricted to free UBI repos only.
-RUN microdnf install -y \
-    --disablerepo='*' \
-    --enablerepo='ubi-9-baseos-rpms' \
-    --enablerepo='ubi-9-appstream-rpms' \
+RUN dnf install -y \
     wget \
     tar \
-    gstreamer1 \
-    gstreamer1-plugins-base \
-    && microdnf clean all
+    gstreamer1 && \
+    dnf install -y 'gstreamer1-plugins-*'' \
+    && dnf clean all
 
 # Pin setuptools<82 before torch (torch 2.12.x requires setuptools<82)
 RUN pip install --no-cache-dir "setuptools<82"

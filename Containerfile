@@ -1,3 +1,38 @@
+FROM registry.redhat.io/rhel9/python-314 AS openh264-builder
+
+USER root
+
+RUN dnf config-manager --set-enabled codeready-builder-for-rhel-9-x86_64-rpms && \
+    dnf install -y \
+        wget \
+        bzip2 \
+        git \
+        meson \
+        ninja-build \
+        gcc \
+        gcc-c++ \
+        pkgconf-pkg-config \
+        gstreamer1-devel \
+        gstreamer1-plugins-base-devel \
+        glib2-devel \
+        orc-devel && \
+    dnf clean all && \
+    mkdir -p /build && cd /build && \
+    wget -q http://ciscobinary.openh264.org/libopenh264-2.6.0-linux64.8.so.bz2 -O libopenh264.so.bz2 && \
+    bunzip2 libopenh264.so.bz2 && \
+    echo "1859c0aaf825429cbf36f1f496c5e08c  libopenh264.so" | md5sum -c - && \
+    git clone --quiet --depth 1 --branch v2.6.0 https://github.com/cisco/openh264.git openh264-src && \
+    mkdir -p /opt/openh264/include/wels /opt/openh264/lib64/pkgconfig && \
+    cp openh264-src/codec/api/wels/*.h /opt/openh264/include/wels/ && \
+    cp libopenh264.so /opt/openh264/lib64/libopenh264.so.8 && \
+    ln -sf libopenh264.so.8 /opt/openh264/lib64/libopenh264.so && \
+    printf 'prefix=/opt/openh264\nlibdir=${prefix}/lib64\nincludedir=${prefix}/include\n\nName: openh264\nDescription: OpenH264 codec library (Cisco binary)\nVersion: 2.6.0\nLibs: -L${libdir} -lopenh264\nCflags: -I${includedir}\n' > /opt/openh264/lib64/pkgconfig/openh264.pc && \
+    wget -q https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.12.tar.xz && \
+    tar xf gst-plugins-bad-1.22.12.tar.xz && \
+    cd gst-plugins-bad-1.22.12 && \
+    PKG_CONFIG_PATH=/opt/openh264/lib64/pkgconfig meson setup builddir -Dauto_features=disabled -Dopenh264=enabled -Dgpl=disabled --prefix=/usr && \
+    ninja -C builddir ext/openh264/libgstopenh264.so
+
 FROM registry.redhat.io/rhel9/python-314
 
 USER root
@@ -41,12 +76,15 @@ COPY yolo-weight-delta /opt/weight-delta
 
 ENV PYTHONPATH="/opt/YOLOX:/opt/weight-delta"
 
-# Copy inference server application
 COPY app/ /app/
+COPY --from=openh264-builder /build/gst-plugins-bad-1.22.12/builddir/ext/openh264/libgstopenh264.so /usr/lib64/gstreamer-1.0/libgstopenh264.so
+COPY --from=openh264-builder /build/libopenh264.so /usr/lib64/libopenh264.so.8
 
 RUN mkdir -p /models && \
     chgrp -R 0 /app /models /opt/YOLOX /opt/weight-delta && \
-    chmod -R g=u /app /models /opt/YOLOX /opt/weight-delta
+    chmod -R g=u /app /models /opt/YOLOX /opt/weight-delta && \
+    ln -sf libopenh264.so.8 /usr/lib64/libopenh264.so && \
+    ldconfig
 
 EXPOSE 8000
 

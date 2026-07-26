@@ -34,7 +34,7 @@ CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.25"))
 NMS_THRESHOLD  = float(os.getenv("NMS_THRESHOLD", "0.45"))
 INPUT_SIZE     = int(os.getenv("INPUT_SIZE", "640"))
 NUM_CLASSES    = int(os.getenv("NUM_CLASSES", "80"))
-DEVICE         = "cpu"
+DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
 
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
@@ -102,6 +102,7 @@ def load_model():
 
     model = exp.get_model()
     model.eval()
+    model.to(DEVICE)
 
     ckpt    = torch.load(model_path, map_location=DEVICE)
     weights = ckpt.get("model", ckpt)

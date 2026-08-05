@@ -55,7 +55,7 @@ RUN dnf config-manager --set-enabled codeready-builder-for-rhel-9-x86_64-rpms &&
     pip install --no-cache-dir \
         "torch>=2.6" \
         "torchvision>=0.21" \
-        --index-url https://download.pytorch.org/whl/cu132 && \
+        --index-url https://download.pytorch.org/whl/cu128 && \
     pip install --no-cache-dir pycairo "pygobject<3.51" && \
     pip install --no-cache-dir \
         numpy \

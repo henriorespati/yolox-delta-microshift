@@ -34,7 +34,10 @@ CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.25"))
 NMS_THRESHOLD  = float(os.getenv("NMS_THRESHOLD", "0.45"))
 INPUT_SIZE     = int(os.getenv("INPUT_SIZE", "640"))
 NUM_CLASSES    = int(os.getenv("NUM_CLASSES", "80"))
-DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
+cuda_available = torch.cuda.is_available()
+logger.info(f"CUDA available: {cuda_available}")
+DEVICE = "cuda" if cuda_available else "cpu"
+logger.info(f"Using device: {DEVICE}")
 
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
@@ -81,7 +84,7 @@ def preprocess_image(img_bgr: np.ndarray):
     img = padded[:, :, ::-1].transpose(2, 0, 1)   # BGR→RGB, HWC→CHW
     img = np.ascontiguousarray(img, dtype=np.float32)
 
-    tensor = torch.from_numpy(img).unsqueeze(0)    # [1, 3, H, W]
+    tensor = torch.from_numpy(img).unsqueeze(0).to(DEVICE)    # [1, 3, H, W]
     return tensor, float(ratio)
 
 
